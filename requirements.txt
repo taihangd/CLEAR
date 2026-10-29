@@ -1,0 +1,13 @@
+# Core runtime dependencies
+numpy>=2.0
+scipy>=1.14
+networkx>=3.2
+requests>=2.31
+PyYAML>=6.0
+tqdm>=4.66
+psutil>=5.9
+scikit-learn>=1.4
+faiss-cpu>=1.8
+
+# Offline unit tests
+pytest>=8.0
