@@ -7,6 +7,7 @@ from copy import deepcopy
 import json
 import math
 import numbers
+import re
 
 
 _QUERY_FIELDS = {"query_id", "source_group_id", "camera_trace", "observed_points", "trusted_observation_indices",
@@ -199,7 +200,13 @@ def format_mapping_experience_context(payload):
             + json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
 
 
-def build_camera_mapping_prompt(context, *, include_pair_evidence=False, road_graph=None):
+def build_camera_mapping_prompt(
+    context,
+    *,
+    include_pair_evidence=False,
+    road_graph=None,
+    retrieved_experience=None,
+):
     """Reuse the frozen road-intent prompt while wrapping it with an outer camera-to-node mapping selection schema."""
     from traj_rec_st_cot import build_cluster_track_prompt
 
@@ -223,31 +230,41 @@ def build_camera_mapping_prompt(context, *, include_pair_evidence=False, road_gr
             "camera_node_choices, tracks and unassigned_obs_ids; no extra keys. " + prompt)
     if type(include_pair_evidence) is not bool:
         raise ValueError("include_pair_evidence must be an explicit boolean")
-    if not include_pair_evidence:
-        return prompt
-    if road_graph is None:
-        raise ValueError("Explicit pair evidence requires the unchanged supplied road graph")
-    evidence = build_camera_mapping_pair_evidence(context, road_graph=road_graph)
-    return (prompt + "\n[PAIR_COMPARISON_FACTS]\n"
-            + json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
-            + "\n[PAIR_COMPARISON_SEMANTICS]\n"
-            "These are all public Top2 endpoint combinations for adjacent source observations, "
-            "not complete route candidates or a physical feasible-domain guarantee. Directed reachability "
-            "and distance refer only to the supplied graph. A missing supplied-graph route does not prove "
-            "global physical impossibility. Observed time deltas and required average speeds are diagnostics; "
-            "true passage times and reliable maximum speed remain unknown. Do not turn these speeds or "
-            "distances into hard acceptance thresholds or assume that the shortest route is the true route. "
-            "Same-camera different-node combinations violate the existing one-mapping-per-camera protocol; "
-            "all combinations are still displayed. Pair choices must be consistent throughout the query. "
-            "Zero distance for equal endpoints permits staying but does not identify whether a loop occurred. "
-            "Only original adjacent pairs are tabulated; exclusions may create untabulated intervals. "
-            "The full supplied graph and original road-intent actions remain available. "
-            "This block does not change the required output object or execution constraints.\n")
+    if include_pair_evidence:
+        if road_graph is None:
+            raise ValueError("Explicit pair evidence requires the unchanged supplied road graph")
+        evidence = build_camera_mapping_pair_evidence(context, road_graph=road_graph)
+        prompt = (prompt + "\n[PAIR_COMPARISON_FACTS]\n"
+                + json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
+                + "\n[PAIR_COMPARISON_SEMANTICS]\n"
+                "These are all public Top2 endpoint combinations for adjacent source observations, "
+                "not complete route candidates or a physical feasible-domain guarantee. Directed reachability "
+                "and distance refer only to the supplied graph. A missing supplied-graph route does not prove "
+                "global physical impossibility. Observed time deltas and required average speeds are diagnostics; "
+                "true passage times and reliable maximum speed remain unknown. Do not turn these speeds or "
+                "distances into hard acceptance thresholds or assume that the shortest route is the true route. "
+                "Same-camera different-node combinations violate the existing one-mapping-per-camera protocol; "
+                "all combinations are still displayed. Pair choices must be consistent throughout the query. "
+                "Zero distance for equal endpoints permits staying but does not identify whether a loop occurred. "
+                "Only original adjacent pairs are tabulated; exclusions may create untabulated intervals. "
+                "The full supplied graph and original road-intent actions remain available. "
+                "This block does not change the required output object or execution constraints.\n")
+    if retrieved_experience is not None:
+        block = (
+            retrieved_experience
+            if isinstance(retrieved_experience, str)
+            else format_mapping_experience_context(retrieved_experience)
+        )
+        if len(block) > 4000:
+            raise ValueError("Retrieved mapping experience exceeds 4000-character budget")
+        prompt = prompt + block
+    return prompt
 
 
 def parse_camera_mapping_response(text, context, *, road_graph):
     """Parse the strict outer JSON wrapper; camera mappings must be complete and within the candidate set without silent fallbacks, while road intents are validated by the original parser."""
     from traj_rec_st_cot import parse_cluster_track_groups
+    from utils.cluster_road_intents import _strip_loose_markdown_fence
 
     if context.get("camera_mapping_protocol") != "camera_mapping_v1":
         raise ValueError("Camera mapping response requires explicit experiment context")
@@ -268,7 +285,10 @@ def parse_camera_mapping_response(text, context, *, road_graph):
 
     if not isinstance(text, str):
         raise ValueError("Camera mapping requires one complete pure JSON string")
-    payload = json.loads(text, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    stripped = text.strip()
+    if re.fullmatch(r"```(?:json)?\s*[\s\S]*?\s*```", stripped, flags=re.IGNORECASE):
+        stripped = _strip_loose_markdown_fence(stripped)
+    payload = json.loads(stripped, object_pairs_hook=unique_object, parse_constant=invalid_constant)
     if not isinstance(payload, dict) or set(payload) != {"camera_node_choices", "tracks", "unassigned_obs_ids"}:
         raise ValueError("Camera mapping response has exactly camera_node_choices, tracks and unassigned_obs_ids")
     choices = payload["camera_node_choices"]
@@ -476,7 +496,7 @@ def evaluate_cluster_invocation_gate(
     camera_to_node,
     shortest_paths,
     rule_config=None,
-    max_speed_mps=None,
+    max_speed_mps=25.0,
     min_dwell_sec=30.0,
     max_span_m=1200.0,
     detour_ratio_threshold=1.05,
@@ -537,6 +557,7 @@ def evaluate_cluster_invocation_gate(
         else:
             if reason in {
                 "reverse_time",
+                "zero_time_delta",
                 "nonfinite_time_delta",
                 "missing_shortest_path",
                 "invalid_cached_path",

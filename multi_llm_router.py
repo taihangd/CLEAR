@@ -205,8 +205,8 @@ class PerformanceAwareMultiLLMRouter:
         if _number(delta) is None or delta < 0 or delta > 1:
             raise ValueError("delta must be an absolute F1 difference in [0,1]")
         self.delta, self.seed = float(delta), int(seed)
-        self.predictor_params = {"n_estimators": 80, "max_depth": 2,
-                                 "min_samples_leaf": 2, "learning_rate": .05}
+        self.predictor_params = {"n_estimators": 120, "max_depth": 3,
+                                 "min_samples_leaf": 1, "learning_rate": .08}
         self.predictor_params.update(predictor_params or {})
         self.predictor_params["random_state"] = self.seed
         self.quality_predictor = self.latency_predictor = None
