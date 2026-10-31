@@ -28,7 +28,7 @@ Reference implementation and supplementary material for cluster-level road-netwo
 ├── eval.py                    # Multi-metric evaluator (Macro/Micro F1, STLC, LCSS, Vol-MSE)
 ├── utils/                     # Core C1, C2, and C3 algorithmic modules
 ├── config/uv.yaml             # Example dataset and model configuration template
-└── tests/                     # Offline unit tests for C1, C2, and C3 core logic
+└── tests/                     # Unit tests for C1, C2, and C3 core logic
 ```
 
 ---
@@ -40,7 +40,7 @@ Reference implementation and supplementary material for cluster-level road-netwo
    pip install -r requirements.txt
    ```
 
-2. Configure dataset paths in the example template [`config/uv.yaml`](config/uv.yaml), and export the official provider API keys (OpenAI and Alibaba Cloud DashScope) when running live LLM inference:
+2. Configure dataset paths in [`config/uv.yaml`](config/uv.yaml) and export the provider API keys (OpenAI and Alibaba Cloud DashScope):
    ```bash
    export OPENAI_API_KEY="your-openai-api-key"
    export DASHSCOPE_API_KEY="your-dashscope-api-key"
@@ -50,10 +50,14 @@ Reference implementation and supplementary material for cluster-level road-netwo
 
 ## Quick Verification
 
-Run the offline unit test suite via `pytest` or directly with Python:
+1. Run the `C1`–`C3` core unit test suite:
+   ```bash
+   pytest -q
+   # or:
+   python3 tests/test_traj_rec_core.py
+   ```
 
-```bash
-pytest -q
-# or:
-python3 tests/test_traj_rec_core.py
-```
+2. Run the trajectory recovery pipeline with the example configuration [`config/uv.yaml`](config/uv.yaml):
+   ```bash
+   python3 main.py --cfg_file config/uv.yaml --allow-api
+   ```
